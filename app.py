@@ -12,87 +12,160 @@ def to_excel(df):
         df.to_excel(writer, index=False, sheet_name='Stock_Analysis')
     return output.getvalue()
 
-def analyze_stocks(tickers):
+def analyze_stocks_v2(tickers):
     results = []
+
     for symbol in tickers:
         try:
             stock = yf.Ticker(symbol)
             info = stock.info
+
             fin = stock.financials
             cf = stock.cashflow
-            
-            # --- 1. Сбор базовых данных ---
-            mcap = info.get('marketCap', 0)
-            pe = info.get('trailingPE')
-            margin = info.get('profitMargins', 0) * 100
-            total_debt = info.get('totalDebt', 0)
-            cr = info.get('currentRatio', 0)
-            payout_ratio = info.get('payoutRatio', 0)
-            
-            # Разделяем Выручку и Чистую прибыль (Income)
+
+            # --- Проверки ---
+            if fin.empty or cf.empty:
+                continue
+
+            # --- Финансовые данные (сортировка по годам) ---
+            fin = fin.sort_index(axis=1, ascending=False)
+            cf = cf.sort_index(axis=1, ascending=False)
+
             rev_current = fin.loc['Total Revenue'].iloc[0]
-            rev_prev = fin.loc['Total Revenue'].iloc[1]
+            rev_prev = fin.loc['Total Revenue'].iloc[1] if fin.shape[1] > 1 else 0
+
             net_inc_current = fin.loc['Net Income'].iloc[0]
-            net_inc_prev = fin.loc['Net Income'].iloc[1]
-            
-            # Свободный денежный поток (FCF) и Долг к рынку
+            net_inc_prev = fin.loc['Net Income'].iloc[1] if fin.shape[1] > 1 else 0
+
             ocf = cf.loc['Operating Cash Flow'].iloc[0]
             capex = abs(cf.loc['Capital Expenditure'].iloc[0])
             fcf = ocf - capex
-            
-            if pe is None or pe == 0:
-                pe = mcap / net_inc_current if net_inc_current != 0 else 0
 
-            # Честный расчет P/FCF (может быть отрицательным)
-            p_fcf = mcap / fcf if fcf != 0 else 0
-            debt_market_ratio = (total_debt / mcap * 100) if mcap > 0 else 0
+            # --- Базовые показатели ---
+            mcap = info.get('marketCap', 0)
+            total_debt = info.get('totalDebt', 0)
+            current_ratio = info.get('currentRatio', 0)
 
-            # --- 2. Работа с дивидендами (Trailing - как в Trading 212) ---
-            div_yield_raw = info.get('trailingAnnualDividendYield', 0)
-            if not div_yield_raw:
-                div_yield_raw = info.get('dividendYield', 0)
-            div_yield = div_yield_raw * 100 if div_yield_raw else 0
+            # --- Маржа (реальная) ---
+            margin = (net_inc_current / rev_current * 100) if rev_current else 0
 
-            # --- 3. Скорринг (Логика баллов) ---
+            # --- P/E ---
+            pe = info.get('trailingPE')
+            if net_inc_current <= 0:
+                pe = None
+
+            # --- P/FCF ---
+            p_fcf = mcap / fcf if fcf != 0 else None
+
+            # --- Debt ratios ---
+            debt_market = (total_debt / mcap * 100) if mcap else 0
+            debt_fcf = (total_debt / fcf) if fcf > 0 else None
+
+            # --- Dividend ---
+            div_yield = info.get('trailingAnnualDividendYield')
+            if div_yield:
+                div_yield *= 100
+            else:
+                div_yield = 0
+
+            payout_ratio = info.get('payoutRatio', 0)
+
+            # --- Определение режима ---
+            if net_inc_current > 0:
+                mode = "PROFITABLE"
+            elif rev_current > rev_prev:
+                mode = "GROWTH"
+            else:
+                mode = "VENTURE"
+
+            # --- СКОРИНГ ---
             score = 0
-            if rev_current > rev_prev: score += 1      # Рост продаж
-            if net_inc_current > net_inc_prev: score += 1 # Рост прибыли
-            if fcf > 0: score += 1                     # Положительный поток
-            
-            # Фильтр цены (P/E)
-            if 0 < pe <= 25: score += 1
-            elif pe > 50 or pe < 0: score -= 2         # Штраф за пузырь или убыток
-            
-            if 0 < p_fcf <= 25: score += 1
-            if cr > 1.1: score += 1
-            if margin > 15: score += 1
-            if debt_market_ratio < 20: score += 1
-            
-            # Логика дивидендов
-            if div_yield > 0:
+
+            # --- Общие факторы ---
+            if rev_current > rev_prev:
                 score += 1
-                if 0 < payout_ratio < 0.7: score += 1  # Надежно
-                elif payout_ratio > 1.0: score -= 2    # Рискованно (платят в долг)
 
-            signal = "🚀 КУПИТЬ" if score >= 7 else "👀 ЖДАТЬ" if score >= 5 else "❌ МИМО"
+            if current_ratio > 1.2:
+                score += 1
 
-            # --- 4. Формирование результата ---
+            if debt_market < 30:
+                score += 1
+
+            # --- PROFITABLE ---
+            if mode == "PROFITABLE":
+                score += 2  # сам факт прибыли
+
+                if net_inc_current > net_inc_prev:
+                    score += 1
+
+                if fcf > 0:
+                    score += 1
+
+                if pe and 0 < pe <= 25:
+                    score += 1
+                elif pe and pe > 50:
+                    score -= 2
+
+                if margin > 15:
+                    score += 1
+
+                if div_yield > 0:
+                    score += 1
+                    if 0 < payout_ratio < 0.7:
+                        score += 1
+                    elif payout_ratio > 1:
+                        score -= 2
+
+            # --- GROWTH ---
+            elif mode == "GROWTH":
+                score += 1  # ростовая модель
+
+                if fcf > 0:
+                    score += 2  # редкость для growth
+
+                if margin > -20:
+                    score += 1
+
+                if pe is None:
+                    score += 1  # нормально для роста
+
+            # --- VENTURE ---
+            else:
+                score -= 1  # высокая неопределённость
+
+                if rev_current > 0:
+                    score += 1
+
+                if total_debt == 0:
+                    score += 1
+
+            # --- Сигнал ---
+            if score >= 7:
+                signal = "🚀 КУПИТЬ"
+            elif score >= 5:
+                signal = "👀 ЖДАТЬ"
+            else:
+                signal = "❌ МИМО"
+
             results.append({
                 "Тикер": symbol,
+                "Режим": mode,
                 "Сигнал": signal,
-                "Баллы": f"{score}/10",
-                "Капитализация": f"${mcap/1e9:.1f}B",
-                "Див. доходность (%)": round(div_yield, 2),
-                "P/E": round(pe, 1) if pe and pe != 0 else "N/A",
-                "P/FCF": round(p_fcf, 1) if p_fcf and p_fcf != 0 else "N/A",
+                "Баллы": score,
+                "Капитализация ($B)": round(mcap / 1e9, 2),
+                "P/E": round(pe, 1) if pe else "N/A",
+                "P/FCF": round(p_fcf, 1) if p_fcf else "N/A",
                 "Маржа (%)": round(margin, 1),
+                "FCF": "✅" if fcf > 0 else "❌",
                 "Выручка": "⬆️" if rev_current > rev_prev else "⬇️",
                 "Прибыль": "⬆️" if net_inc_current > net_inc_prev else "⬇️",
-                "Долг/Рынок (%)": round(debt_market_ratio, 1),
-                "Yahoo": f"https://finance.yahoo.com/quote/{symbol}"
+                "Долг/Рынок (%)": round(debt_market, 1),
+                "Дивиденды (%)": round(div_yield, 2)
             })
+
         except Exception as e:
-            st.error(f"Ошибка в данных {symbol}: {e}")
+            print(f"{symbol} ошибка: {e}")
+
     return pd.DataFrame(results)
 
 # --- ИНТЕРФЕЙС STREAMLIT ---
@@ -101,39 +174,54 @@ st.title("📊 Финансовый Терминал: История и Перс
 user_input = st.text_input("Введите тикеры (через запятую):", "V, MA, KO, TSLA")
 tickers = [t.strip().upper() for t in user_input.split(",")]
 
+mode_filter = st.selectbox(
+    "🎯 Режим анализа:",
+    options=["ALL", "PROFITABLE", "GROWTH", "VENTURE"],
+    help="Фильтрация компаний по типу бизнес-модели"
+)
+
+
 if st.button("Запустить анализ"):
     with st.spinner('Анализирую отчетность...'):
-        df = analyze_stocks(tickers)
-        
-        if not df.empty:
-            # Сортировка по баллам (опционально)
-            df['score_num'] = df['Баллы'].str.split('/').str[0].astype(int)
-            df = df.sort_values(by='score_num', ascending=False).drop(columns=['score_num'])
+        df = analyze_stocks_v2(tickers)
 
-            # Кнопка Excel
+        if not df.empty:
+
+            # --- Фильтрация по MODE ---
+            if mode_filter != "ALL":
+                df = df[df["Режим"] == mode_filter]
+
+            # --- Сортировка по баллам ---
+            df = df.sort_values(by="Баллы", ascending=False)
+
+            # --- Экспорт в Excel ---
             excel_data = to_excel(df)
-            st.download_button(label='📥 Скачать отчет в Excel',
-                               data=excel_data,
-                               file_name='stock_analysis.xlsx',
-                               mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            
-            # Отображение таблицы
+            st.download_button(
+                label='📥 Скачать отчет в Excel',
+                data=excel_data,
+                file_name='stock_analysis.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+
+            # --- Таблица ---
             st.dataframe(
                 df,
                 column_config={
                     "Yahoo": st.column_config.LinkColumn("Yahoo Link", display_text="Открыть"),
-                    "Баллы": st.column_config.TextColumn("🏆 Рейтинг"),
-                    "Див. доходность (%)": st.column_config.NumberColumn("Дивиденды", format="%.2f%% 💰")
+                    "Баллы": st.column_config.NumberColumn("🏆 Рейтинг"),
+                    "Дивиденды (%)": st.column_config.NumberColumn("Дивиденды", format="%.2f%% 💰"),
+                    "Режим": st.column_config.TextColumn("📌 MODE")
                 },
                 hide_index=True,
                 use_container_width=True
             )
-            st.success("Анализ завершен! Самые сильные компании вверху списка.")
+
+            st.success("Анализ завершен!")
 
 
 st.divider()
 st.sidebar.header("Как это работает?")
-st.sidebar.info("""
+st.text("""
 1. Блок «История и Качество» (Что уже произошло?)
 Этот блок отвечает на вопрос: «Умеет ли этот бизнес зарабатывать деньги?»
 
