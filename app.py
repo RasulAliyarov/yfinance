@@ -51,6 +51,11 @@ def analyze_stocks_v2(tickers):
 
             # --- P/E ---
             pe = info.get('trailingPE')
+
+            if pe is None:
+                pe = mcap / net_inc_current if net_inc_current != 0 else None
+
+                
             if net_inc_current <= 0:
                 pe = None
 
@@ -147,14 +152,22 @@ def analyze_stocks_v2(tickers):
             else:
                 signal = "❌ МИМО"
 
+            # --- Эмодзи для Режима ---
+            mode_map = {
+                "PROFITABLE": "💰 PROFIT",
+                "GROWTH": "🚀 GROWTH",
+                "VENTURE": "🧪 VENTURE"
+            }
+            display_mode = mode_map.get(mode, mode)
+
             results.append({
                 "Тикер": symbol,
                 "Режим": mode,
                 "Сигнал": signal,
                 "Баллы": score,
                 "Капитализация ($B)": round(mcap / 1e9, 2),
-                "P/E": round(pe, 1) if pe else "N/A",
-                "P/FCF": round(p_fcf, 1) if p_fcf else "N/A",
+                "P/E": round(pe, 1) if pe is not None else "N/A",
+                "P/FCF": round(p_fcf, 1) if p_fcf is not None else "N/A",
                 "Маржа (%)": round(margin, 1),
                 "FCF": "✅" if fcf > 0 else "❌",
                 "Выручка": "⬆️" if rev_current > rev_prev else "⬇️",
