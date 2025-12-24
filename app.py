@@ -15,16 +15,15 @@ def analyze_stocks(tickers):
             fin = stock.financials
             cf = stock.cashflow
             
-            # Данные для анализа
+            # --- 1. Сбор базовых данных ---
             mcap = info.get('marketCap', 0)
-            # % Дивидендов (dividendYield дает значение 0.015 для 1.5%)
-            div_yield = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
             pe = info.get('trailingPE', 0)
             margin = info.get('profitMargins', 0) * 100
             total_debt = info.get('totalDebt', 0)
             cr = info.get('currentRatio', 0)
+            payout_ratio = info.get('payoutRatio', 0)
             
-            # Динамика выручки и прибыли
+            # Динамика (Выручка и Прибыль)
             rev_current = fin.loc['Total Revenue'].iloc[0]
             rev_prev = fin.loc['Total Revenue'].iloc[1]
             net_inc_current = fin.loc['Net Income'].iloc[0]
@@ -37,18 +36,36 @@ def analyze_stocks(tickers):
             p_fcf = mcap / fcf if fcf > 0 else 0
             debt_market_ratio = (total_debt / mcap * 100) if mcap > 0 else 0
 
-            # Скорринг (9 пунктов)
+            # --- 2. Работа с дивидендами (Trailing) ---
+            div_yield_raw = info.get('trailingAnnualDividendYield', 0)
+            if not div_yield_raw: # Если trailing пуст, берем обычный
+                div_yield_raw = info.get('dividendYield', 0)
+            
+            div_yield = div_yield_raw * 100 if div_yield_raw else 0
+
+            # --- 3. Скорринг (Логика баллов) ---
             score = 0
             if rev_current > rev_prev: score += 1
             if net_inc_current > net_inc_prev: score += 1
             if fcf > 0: score += 1
+            
+            # P/E фильтр
             if 0 < pe <= 25: score += 1
-            elif pe > 50: score -= 2 # Штраф
+            elif pe > 50: score -= 2 
+            
             if 0 < p_fcf <= 25: score += 1
             if cr > 1.1: score += 1
             if margin > 15: score += 1
             if debt_market_ratio < 20: score += 1
-            if div_yield > 0: score += 1 # Балл за наличие дивидендов
+            
+            # Логика дивидендов (Надежность)
+            if div_yield > 0:
+                score += 1 # Балл за сам факт выплаты
+                if 0 < payout_ratio < 0.7:
+                    score += 1 # Дополнительный балл за безопасность (тратят < 70%)
+                elif payout_ratio > 1.0:
+                    score -= 2 # ШТРАФ: Платят больше, чем зарабатывают (риск отмены)
+
 
             signal = "🚀 КУПИТЬ" if score >= 7 else "👀 ЖДАТЬ" if score >= 5 else "❌ МИМО"
 
