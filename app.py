@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 from io import BytesIO
 
-# Настройка страницы
 st.set_page_config(page_title="Stock Analyzer Pro", layout="wide")
 
 def to_excel(df):
@@ -14,68 +13,49 @@ def to_excel(df):
 
 def analyze_stocks_v2(tickers):
     results = []
-
     for symbol in tickers:
         try:
             stock = yf.Ticker(symbol)
             info = stock.info
-
             fin = stock.financials
             cf = stock.cashflow
 
-            # --- Проверки ---
             if fin.empty or cf.empty:
                 continue
 
-            # --- Финансовые данные (сортировка по годам) ---
             fin = fin.sort_index(axis=1, ascending=False)
             cf = cf.sort_index(axis=1, ascending=False)
 
+            # Данные
             rev_current = fin.loc['Total Revenue'].iloc[0]
             rev_prev = fin.loc['Total Revenue'].iloc[1] if fin.shape[1] > 1 else 0
-
             net_inc_current = fin.loc['Net Income'].iloc[0]
             net_inc_prev = fin.loc['Net Income'].iloc[1] if fin.shape[1] > 1 else 0
-
+            
             ocf = cf.loc['Operating Cash Flow'].iloc[0]
             capex = abs(cf.loc['Capital Expenditure'].iloc[0])
             fcf = ocf - capex
 
-            # --- Базовые показатели ---
             mcap = info.get('marketCap', 0)
             total_debt = info.get('totalDebt', 0)
             current_ratio = info.get('currentRatio', 0)
-
-            # --- Маржа (реальная) ---
             margin = (net_inc_current / rev_current * 100) if rev_current else 0
 
-            # --- P/E ---
+            # --- ИСПРАВЛЕННЫЙ P/E (показывает минус) ---
             pe = info.get('trailingPE')
-
-            if pe is None:
+            if pe is None or pe == 0:
                 pe = mcap / net_inc_current if net_inc_current != 0 else None
 
-
-            if net_inc_current <= 0:
-                pe = None
-
-            # --- P/FCF ---
+            # --- ИСПРАВЛЕННЫЙ P/FCF (показывает минус) ---
             p_fcf = mcap / fcf if fcf != 0 else None
 
-            # --- Debt ratios ---
             debt_market = (total_debt / mcap * 100) if mcap else 0
-            debt_fcf = (total_debt / fcf) if fcf > 0 else None
-
-            # --- Dividend ---
-            div_yield = info.get('trailingAnnualDividendYield')
-            if div_yield:
-                div_yield *= 100
-            else:
-                div_yield = 0
-
+            
+            div_yield = info.get('trailingAnnualDividendYield', 0)
+            div_yield = div_yield * 100 if div_yield else 0
             payout_ratio = info.get('payoutRatio', 0)
 
-            # --- Определение режима ---
+            # Определение режима
             if net_inc_current > 0:
                 mode = "PROFITABLE"
             elif rev_current > rev_prev:
@@ -83,78 +63,37 @@ def analyze_stocks_v2(tickers):
             else:
                 mode = "VENTURE"
 
-            # --- СКОРИНГ ---
+            # СКОРИНГ
             score = 0
+            if rev_current > rev_prev: score += 1
+            if current_ratio > 1.2: score += 1
+            if debt_market < 30: score += 1
 
-            # --- Общие факторы ---
-            if rev_current > rev_prev:
-                score += 1
-
-            if current_ratio > 1.2:
-                score += 1
-
-            if debt_market < 30:
-                score += 1
-
-            # --- PROFITABLE ---
             if mode == "PROFITABLE":
-                score += 2  # сам факт прибыли
-
-                if net_inc_current > net_inc_prev:
-                    score += 1
-
-                if fcf > 0:
-                    score += 1
-
-                if pe and 0 < pe <= 25:
-                    score += 1
-                elif pe and pe > 50:
-                    score -= 2
-
-                if margin > 15:
-                    score += 1
-
+                score += 2
+                if net_inc_current > net_inc_prev: score += 1
+                if fcf > 0: score += 1
+                if pe and 0 < pe <= 25: score += 1
+                elif pe and (pe > 50 or pe < 0): score -= 2
+                if margin > 15: score += 1
                 if div_yield > 0:
                     score += 1
-                    if 0 < payout_ratio < 0.7:
-                        score += 1
-                    elif payout_ratio > 1:
-                        score -= 2
-
-            # --- GROWTH ---
+                    if 0 < payout_ratio < 0.7: score += 1
+                    elif payout_ratio > 1: score -= 2
             elif mode == "GROWTH":
-                score += 1  # ростовая модель
-
-                if fcf > 0:
-                    score += 2  # редкость для growth
-
-                if margin > -20:
-                    score += 1
-
-                if pe is None:
-                    score += 1  # нормально для роста
-
-            # --- VENTURE ---
+                score += 1
+                if fcf > 0: score += 2
+                if margin > -20: score += 1
             else:
-                score -= 1  # высокая неопределённость
+                score -= 1
+                if rev_current > 0: score += 1
+                if total_debt == 0: score += 1
 
-                if rev_current > 0:
-                    score += 1
-
-                if total_debt == 0:
-                    score += 1
-
-            # --- Сигнал ---
-            if score >= 7:
-                signal = "🚀 КУПИТЬ"
-            elif score >= 5:
-                signal = "👀 ЖДАТЬ"
-            else:
-                signal = "❌ МИМО"
-
+            signal = "🚀 КУПИТЬ" if score >= 7 else "👀 ЖДАТЬ" if score >= 5 else "❌ МИМО"
 
             results.append({
                 "Тикер": symbol,
+                "Режим": mode,
                 "Сигнал": signal,
                 "Баллы": score,
                 "Капитализация ($B)": round(mcap / 1e9, 2),
@@ -167,63 +106,44 @@ def analyze_stocks_v2(tickers):
                 "Долг/Рынок (%)": round(debt_market, 1),
                 "Дивиденды (%)": round(div_yield, 2)
             })
-
         except Exception as e:
-            print(f"{symbol} ошибка: {e}")
+            st.warning(f"Ошибка тикера {symbol}: {e}")
 
     return pd.DataFrame(results)
 
-# --- ИНТЕРФЕЙС STREAMLIT ---
-st.title("📊 Финансовый Терминал: История и Перспективы")
+# --- ИНТЕРФЕЙС ---
+st.title("📊 Финансовый Терминал")
 
-user_input = st.text_input("Введите тикеры (через запятую):", "V, MA")
-
-mode_filter = st.selectbox(
-    "🎯 Режим анализа:",
-    options=["ALL", "PROFITABLE", "GROWTH", "VENTURE"],
-    help="Фильтрация компаний по типу бизнес-модели"
-)
-
+user_input = st.text_input("Введите тикеры:", "V, MA")
 tickers = [t.strip().upper() for t in user_input.split(",")]
-
+mode_filter = st.selectbox("🎯 Режим анализа:", options=["ALL", "PROFITABLE", "GROWTH", "VENTURE"])
 
 
 if st.button("Запустить анализ"):
-    with st.spinner('Анализирую отчетность...'):
+    with st.spinner('Загрузка...'):
         df = analyze_stocks_v2(tickers)
 
         if not df.empty:
-
-            # --- Фильтрация по MODE ---
+            # ФИЛЬТРАЦИЯ (Теперь без KeyError)
             if mode_filter != "ALL":
                 df = df[df["Режим"] == mode_filter]
 
-            # --- Сортировка по баллам ---
             df = df.sort_values(by="Баллы", ascending=False)
 
-            # --- Экспорт в Excel ---
             excel_data = to_excel(df)
-            st.download_button(
-                label='📥 Скачать отчет в Excel',
-                data=excel_data,
-                file_name='stock_analysis.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            )
+            st.download_button(label='📥 Excel', data=excel_data, file_name='analysis.xlsx')
 
-            # --- Таблица ---
+            # Красивое отображение
             st.dataframe(
                 df,
                 column_config={
-                    "Yahoo": st.column_config.LinkColumn("Yahoo Link", display_text="Открыть"),
                     "Баллы": st.column_config.NumberColumn("🏆 Рейтинг"),
-                    "Дивиденды (%)": st.column_config.NumberColumn("Дивиденды", format="%.2f%% 💰"),
-                    "Режим": st.column_config.TextColumn("📌 MODE")
+                    "Дивиденды (%)": st.column_config.NumberColumn("Див %", format="%.2f%%"),
+                    "P/E": st.column_config.TextColumn("P/E (Минус = Убыток)"),
                 },
                 hide_index=True,
                 use_container_width=True
             )
-
-            st.success("Анализ завершен!")
 
 
 st.divider()
