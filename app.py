@@ -35,17 +35,30 @@ def analyze_stocks_v2(tickers):
             ocf = cf.loc['Operating Cash Flow'].iloc[0] if 'Operating Cash Flow' in cf.index else 0
             capex = abs(cf.loc['Capital Expenditure'].iloc[0])
 
-            # Проверяем наличие Capital Expenditure. Если его нет (как у банков), считаем его равным 0
+            if 'Operating Cash Flow' in cf.index:
+                ocf = cf.loc['Operating Cash Flow'].iloc[0]
+            else:
+                ocf = 0
+
+            # Капитальные затраты (у банков их часто нет)
             if 'Capital Expenditure' in cf.index:
                 capex = abs(cf.loc['Capital Expenditure'].iloc[0])
             else:
                 capex = 0
 
+            # Свободный денежный поток
             fcf = ocf - capex
+            
+            # Если OCF нет в данных, принудительно ставим FCF = 0 для безопасности
+            if ocf == 0 and capex == 0:
+                fcf = 0
 
-
+            # --- Базовые показатели с защитой от None ---
             mcap = info.get('marketCap', 0)
-            total_debt = info.get('totalDebt', 0)
+            total_debt = info.get('totalDebt')
+            if total_debt is None: total_debt = 0 # Исправляем None для банков
+            if total_debt is None: total_debt = 0
+
             current_ratio = info.get('currentRatio', 0)
             margin = (net_inc_current / rev_current * 100) if rev_current else 0
 
