@@ -31,10 +31,18 @@ def analyze_stocks_v2(tickers):
             rev_prev = fin.loc['Total Revenue'].iloc[1] if fin.shape[1] > 1 else 0
             net_inc_current = fin.loc['Net Income'].iloc[0]
             net_inc_prev = fin.loc['Net Income'].iloc[1] if fin.shape[1] > 1 else 0
-            
-            ocf = cf.loc['Operating Cash Flow'].iloc[0]
+
+            ocf = cf.loc['Operating Cash Flow'].iloc[0] if 'Operating Cash Flow' in cf.index else 0
             capex = abs(cf.loc['Capital Expenditure'].iloc[0])
+
+            # Проверяем наличие Capital Expenditure. Если его нет (как у банков), считаем его равным 0
+            if 'Capital Expenditure' in cf.index:
+                capex = abs(cf.loc['Capital Expenditure'].iloc[0])
+            else:
+                capex = 0
+
             fcf = ocf - capex
+
 
             mcap = info.get('marketCap', 0)
             total_debt = info.get('totalDebt', 0)
