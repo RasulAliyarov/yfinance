@@ -104,7 +104,8 @@ def analyze_stocks_v2(tickers):
                 "Выручка": "⬆️" if rev_current > rev_prev else "⬇️",
                 "Прибыль": "⬆️" if net_inc_current > net_inc_prev else "⬇️",
                 "Долг/Рынок (%)": round(debt_market, 1),
-                "Дивиденды (%)": round(div_yield, 2)
+                "Дивиденды (%)": round(div_yield, 2),
+                "Yahoo": f"https://finance.yahoo.com/quote/{symbol}" 
             })
         except Exception as e:
             st.warning(f"Ошибка тикера {symbol}: {e}")
@@ -140,6 +141,7 @@ if st.button("Запустить анализ"):
                     "Баллы": st.column_config.NumberColumn("🏆 Рейтинг"),
                     "Дивиденды (%)": st.column_config.NumberColumn("Див %", format="%.2f%%"),
                     "P/E": st.column_config.TextColumn("P/E (Минус = Убыток)"),
+                    "Yahoo": st.column_config.LinkColumn("Yahoo Link", display_text="Открыть"),
                 },
                 hide_index=True,
                 use_container_width=True
