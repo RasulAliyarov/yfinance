@@ -144,7 +144,8 @@ if st.button("Запустить анализ"):
                     "Yahoo": st.column_config.LinkColumn("Yahoo Link", display_text="Открыть"),
                 },
                 hide_index=True,
-                use_container_width=True
+                width='stretch'
+
             )
 
 
