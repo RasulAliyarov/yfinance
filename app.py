@@ -26,48 +26,38 @@ def analyze_stocks_v2(tickers):
             fin = fin.sort_index(axis=1, ascending=False)
             cf = cf.sort_index(axis=1, ascending=False)
 
-            # Данные
+            # --- 1. Сбор данных о доходах ---
             rev_current = fin.loc['Total Revenue'].iloc[0]
             rev_prev = fin.loc['Total Revenue'].iloc[1] if fin.shape[1] > 1 else 0
             net_inc_current = fin.loc['Net Income'].iloc[0]
             net_inc_prev = fin.loc['Net Income'].iloc[1] if fin.shape[1] > 1 else 0
 
-            ocf = cf.loc['Operating Cash Flow'].iloc[0] if 'Operating Cash Flow' in cf.index else 0
-            capex = abs(cf.loc['Capital Expenditure'].iloc[0])
-
+            # --- 2. Безопасный расчет Cash Flow (исправлено для JPM) ---
             if 'Operating Cash Flow' in cf.index:
                 ocf = cf.loc['Operating Cash Flow'].iloc[0]
             else:
                 ocf = 0
 
-            # Капитальные затраты (у банков их часто нет)
             if 'Capital Expenditure' in cf.index:
                 capex = abs(cf.loc['Capital Expenditure'].iloc[0])
             else:
                 capex = 0
 
-            # Свободный денежный поток
             fcf = ocf - capex
             
-            # Если OCF нет в данных, принудительно ставим FCF = 0 для безопасности
-            if ocf == 0 and capex == 0:
-                fcf = 0
-
-            # --- Базовые показатели с защитой от None ---
+            # --- 3. Базовые показатели ---
             mcap = info.get('marketCap', 0)
-            total_debt = info.get('totalDebt')
-            if total_debt is None: total_debt = 0 # Исправляем None для банков
+            total_debt = info.get('totalDebt', 0)
             if total_debt is None: total_debt = 0
-
+            
             current_ratio = info.get('currentRatio', 0)
             margin = (net_inc_current / rev_current * 100) if rev_current else 0
 
-            # --- ИСПРАВЛЕННЫЙ P/E (показывает минус) ---
+            # --- 4. Мультипликаторы (с поддержкой отрицательных значений) ---
             pe = info.get('trailingPE')
             if pe is None or pe == 0:
                 pe = mcap / net_inc_current if net_inc_current != 0 else None
 
-            # --- ИСПРАВЛЕННЫЙ P/FCF (показывает минус) ---
             p_fcf = mcap / fcf if fcf != 0 else None
 
             debt_market = (total_debt / mcap * 100) if mcap else 0
@@ -76,7 +66,7 @@ def analyze_stocks_v2(tickers):
             div_yield = div_yield * 100 if div_yield else 0
             payout_ratio = info.get('payoutRatio', 0)
 
-            # Определение режима
+            # --- 5. Определение режима бизнеса ---
             if net_inc_current > 0:
                 mode = "PROFITABLE"
             elif rev_current > rev_prev:
@@ -84,10 +74,10 @@ def analyze_stocks_v2(tickers):
             else:
                 mode = "VENTURE"
 
-            # СКОРИНГ
+            # --- 6. СКОРИНГ (Логика баллов) ---
             score = 0
             if rev_current > rev_prev: score += 1
-            if current_ratio > 1.2: score += 1
+            if current_ratio > 1.1: score += 1
             if debt_market < 30: score += 1
 
             if mode == "PROFITABLE":
@@ -133,42 +123,38 @@ def analyze_stocks_v2(tickers):
 
     return pd.DataFrame(results)
 
-# --- ИНТЕРФЕЙС ---
-st.title("📊 Финансовый Терминал")
+# --- ИНТЕРФЕЙС STREAMLIT ---
+st.title("📊 Финансовый Терминал: Анализ Качества")
 
-user_input = st.text_input("Введите тикеры:", "V, MA")
+user_input = st.text_input("Введите тикеры (через запятую):", "V, MA, JPM, CLPT")
 tickers = [t.strip().upper() for t in user_input.split(",")]
 mode_filter = st.selectbox("🎯 Режим анализа:", options=["ALL", "PROFITABLE", "GROWTH", "VENTURE"])
 
-
 if st.button("Запустить анализ"):
-    with st.spinner('Загрузка...'):
+    with st.spinner('Сбор данных и расчеты...'):
         df = analyze_stocks_v2(tickers)
 
         if not df.empty:
-            # ФИЛЬТРАЦИЯ (Теперь без KeyError)
             if mode_filter != "ALL":
                 df = df[df["Режим"] == mode_filter]
 
             df = df.sort_values(by="Баллы", ascending=False)
 
             excel_data = to_excel(df)
-            st.download_button(label='📥 Excel', data=excel_data, file_name='analysis.xlsx')
+            st.download_button(label='📥 Скачать Excel', data=excel_data, file_name='stock_analysis.xlsx')
 
-            # Красивое отображение
             st.dataframe(
                 df,
                 column_config={
-                    "Баллы": st.column_config.NumberColumn("🏆 Рейтинг"),
-                    "Дивиденды (%)": st.column_config.NumberColumn("Див %", format="%.2f%%"),
+                    "Баллы": st.column_config.NumberColumn("🏆 Баллы"),
+                    "Дивиденды (%)": st.column_config.NumberColumn("Див. %", format="%.2f%%"),
+                    "Yahoo": st.column_config.LinkColumn("Yahoo", display_text="Открыть"),
                     "P/E": st.column_config.TextColumn("P/E (Минус = Убыток)"),
-                    "Yahoo": st.column_config.LinkColumn("Yahoo Link", display_text="Открыть"),
                 },
                 hide_index=True,
-                width='stretch'
-
+                use_container_width=True
             )
-
+            st.success("Анализ завершен!")
 
 st.divider()
 st.sidebar.header("Как это работает?")
@@ -203,5 +189,7 @@ P/E и P/FCF: Твои стоп-краны. Если они красные (вы
 
 Затем Долг/Рынок: Кто из них меньше обременен долгами?
 
-Пример из твоего скриншота: У V и MA баллы одинаковые (6/9). Но у V показатель P/E чуть ниже (34.6 против 36.9) и маржа чуть выше (50% против 45%). Значит, исторически и фундаментально Visa выглядит чуть привлекательнее на данный момент, хотя обе компании отличные.
+Отрицательный P/E — означает, что компания убыточна (Net Income < 0).
+Отрицательный P/FCF — означает, что компания прожигает наличность (FCF < 0). Она тратит больше, чем зарабатывает.
+        
 """)
