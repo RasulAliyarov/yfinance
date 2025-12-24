@@ -92,18 +92,20 @@ user_input = st.text_input("Введите тикеры (AAPL, MSFT, KO...)", "A
 tickers = [t.strip().upper() for t in user_input.split(",")]
 
 if st.button("Начать проверку"):
-    df = analyze_stocks(tickers)
-    if not df.empty:
-        # Используем column_config для создания кликабельных ссылок
-        st.dataframe(
-            df,
-            column_config={
-                "Yahoo": st.column_config.Link_Column("Ссылка Yahoo")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-
+    with st.spinner('Анализирую отчетность...'):
+        df = analyze_stocks(tickers)
+        if not df.empty:
+            st.data_editor(
+                df,
+                column_config={
+                    "Yahoo": st.column_config.LinkColumn("Ссылка Yahoo")
+                },
+                hide_index=True,
+                use_container_width=True,
+                disabled=df.columns # Запрещаем редактирование, только просмотр
+            )
+            
+            st.success("Анализ завершен!")
 st.divider()
 st.sidebar.header("Как это работает?")
 st.sidebar.info("""
