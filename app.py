@@ -6,6 +6,12 @@ from io import BytesIO
 # Настройка страницы
 st.set_page_config(page_title="Stock Analyzer Pro", layout="wide")
 
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Stock_Analysis')
+    return output.getvalue()
+
 def analyze_stocks(tickers):
     results = []
     for symbol in tickers:
@@ -23,23 +29,22 @@ def analyze_stocks(tickers):
             cr = info.get('currentRatio', 0)
             payout_ratio = info.get('payoutRatio', 0)
             
-            # Динамика (Выручка и Прибыль)
+            # Разделяем Выручку и Чистую прибыль (Income)
             rev_current = fin.loc['Total Revenue'].iloc[0]
             rev_prev = fin.loc['Total Revenue'].iloc[1]
             net_inc_current = fin.loc['Net Income'].iloc[0]
             net_inc_prev = fin.loc['Net Income'].iloc[1]
             
-            # FCF и Долг к рынку
+            # Свободный денежный поток (FCF) и Долг к рынку
             ocf = cf.loc['Operating Cash Flow'].iloc[0]
             capex = abs(cf.loc['Capital Expenditure'].iloc[0])
             fcf = ocf - capex
             
-            # Раньше тут был "if fcf > 0 else 0", теперь считаем честно
+            # Честный расчет P/FCF (может быть отрицательным)
             p_fcf = mcap / fcf if fcf != 0 else 0
-            
             debt_market_ratio = (total_debt / mcap * 100) if mcap > 0 else 0
 
-            # --- 2. Работа с дивидендами ---
+            # --- 2. Работа с дивидендами (Trailing - как в Trading 212) ---
             div_yield_raw = info.get('trailingAnnualDividendYield', 0)
             if not div_yield_raw:
                 div_yield_raw = info.get('dividendYield', 0)
@@ -47,25 +52,24 @@ def analyze_stocks(tickers):
 
             # --- 3. Скорринг (Логика баллов) ---
             score = 0
-            if rev_current > rev_prev: score += 1
-            if net_inc_current > net_inc_prev: score += 1
-            if fcf > 0: score += 1
+            if rev_current > rev_prev: score += 1      # Рост продаж
+            if net_inc_current > net_inc_prev: score += 1 # Рост прибыли
+            if fcf > 0: score += 1                     # Положительный поток
             
-            # P/E фильтр: балл только если компания прибыльна и недорога
+            # Фильтр цены (P/E)
             if 0 < pe <= 25: score += 1
-            elif pe > 50 or pe < 0: score -= 2 # Штраф за пузырь ИЛИ за убыточность
+            elif pe > 50 or pe < 0: score -= 2         # Штраф за пузырь или убыток
             
             if 0 < p_fcf <= 25: score += 1
             if cr > 1.1: score += 1
             if margin > 15: score += 1
             if debt_market_ratio < 20: score += 1
             
+            # Логика дивидендов
             if div_yield > 0:
                 score += 1
-                if 0 < payout_ratio < 0.7:
-                    score += 1
-                elif payout_ratio > 1.0:
-                    score -= 2
+                if 0 < payout_ratio < 0.7: score += 1  # Надежно
+                elif payout_ratio > 1.0: score -= 2    # Рискованно (платят в долг)
 
             signal = "🚀 КУПИТЬ" if score >= 7 else "👀 ЖДАТЬ" if score >= 5 else "❌ МИМО"
 
@@ -73,59 +77,55 @@ def analyze_stocks(tickers):
             results.append({
                 "Тикер": symbol,
                 "Сигнал": signal,
-                "Баллы": score,
+                "Баллы": f"{score}/10",
                 "Капитализация": f"${mcap/1e9:.1f}B",
-                "Дивиденды (%)": round(div_yield, 2),
-                "P/E": round(pe, 1) if pe else "N/A",
+                "Див. доходность (%)": round(div_yield, 2),
+                "P/E": round(pe, 1) if pe else "Убыток",
                 "P/FCF": round(p_fcf, 1) if p_fcf else "N/A",
-                "Долг/Рынок (%)": round(debt_market_ratio, 1),
                 "Маржа (%)": round(margin, 1),
                 "Выручка": "⬆️" if rev_current > rev_prev else "⬇️",
+                "Прибыль": "⬆️" if net_inc_current > net_inc_prev else "⬇️",
+                "Долг/Рынок (%)": round(debt_market_ratio, 1),
                 "Yahoo": f"https://finance.yahoo.com/quote/{symbol}"
             })
-        except:
-            st.error(f"Не удалось собрать данные для {symbol}")
+        except Exception as e:
+            st.error(f"Ошибка в данных {symbol}: {e}")
     return pd.DataFrame(results)
 
-# Функция для конвертации в Excel
-def to_excel(df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Analysis')
-    return output.getvalue()
+# --- ИНТЕРФЕЙС STREAMLIT ---
+st.title("📊 Финансовый Терминал: История и Перспективы")
 
-# Интерфейс
-st.title("📊 Financial Comparison Terminal")
-st.write("Сравнение истории, рисков и дивидендов в реальном времени.")
-
-user_input = st.text_input("Введите тикеры для сравнения:", "V, MA, AAPL, KO")
+user_input = st.text_input("Введите тикеры (через запятую):", "V, MA, KO, TSLA")
 tickers = [t.strip().upper() for t in user_input.split(",")]
 
-if st.button("Провести анализ"):
-    with st.spinner('Считаю показатели...'):
+if st.button("Запустить анализ"):
+    with st.spinner('Анализирую отчетность...'):
         df = analyze_stocks(tickers)
         
         if not df.empty:
-            # Кнопка экспорта
-            excel_file = to_excel(df)
-            st.download_button(
-                label="📥 Скачать отчет в Excel",
-                data=excel_file,
-                file_name="stock_analysis.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            # Сортировка по баллам (опционально)
+            df['score_num'] = df['Баллы'].str.split('/').str[0].astype(int)
+            df = df.sort_values(by='score_num', ascending=False).drop(columns=['score_num'])
+
+            # Кнопка Excel
+            excel_data = to_excel(df)
+            st.download_button(label='📥 Скачать отчет в Excel',
+                               data=excel_data,
+                               file_name='stock_analysis.xlsx',
+                               mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             
             # Отображение таблицы
             st.dataframe(
                 df,
                 column_config={
                     "Yahoo": st.column_config.LinkColumn("Yahoo Link", display_text="Открыть"),
-                    "Баллы": st.column_config.NumberColumn("Баллы", format="%d/9 🏆"),
-                    "Дивиденды (%)": st.column_config.NumberColumn("Дивиденды", format="%.2f%% 💰"),
+                    "Баллы": st.column_config.TextColumn("🏆 Рейтинг"),
+                    "Див. доходность (%)": st.column_config.NumberColumn("Дивиденды", format="%.2f%% 💰")
                 },
                 hide_index=True,
                 use_container_width=True
             )
+            st.success("Анализ завершен! Самые сильные компании вверху списка.")
 
 
 st.divider()
@@ -164,9 +164,4 @@ P/E и P/FCF: Твои стоп-краны. Если они красные (вы
 Затем Долг/Рынок: Кто из них меньше обременен долгами?
 
 Пример из твоего скриншота: У V и MA баллы одинаковые (6/9). Но у V показатель P/E чуть ниже (34.6 против 36.9) и маржа чуть выше (50% против 45%). Значит, исторически и фундаментально Visa выглядит чуть привлекательнее на данный момент, хотя обе компании отличные.
-
-Финальный совет для упрощения интерфейса
-Чтобы таблица не была «простыней», оставь в основном окне только самые важные колонки:
-
-Тикер, Сигнал, Баллы, P/E, Маржа, Долг/Рынок, Yahoo.
 """)
