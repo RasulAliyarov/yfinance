@@ -23,7 +23,7 @@ def analyze_stocks(tickers):
             
             # --- 1. Сбор базовых данных ---
             mcap = info.get('marketCap', 0)
-            pe = info.get('trailingPE', 0)
+            pe = info.get('trailingPE')
             margin = info.get('profitMargins', 0) * 100
             total_debt = info.get('totalDebt', 0)
             cr = info.get('currentRatio', 0)
@@ -40,6 +40,9 @@ def analyze_stocks(tickers):
             capex = abs(cf.loc['Capital Expenditure'].iloc[0])
             fcf = ocf - capex
             
+            if pe is None or pe == 0:
+                pe = mcap / net_inc_current if net_inc_current != 0 else 0
+
             # Честный расчет P/FCF (может быть отрицательным)
             p_fcf = mcap / fcf if fcf != 0 else 0
             debt_market_ratio = (total_debt / mcap * 100) if mcap > 0 else 0
@@ -80,8 +83,8 @@ def analyze_stocks(tickers):
                 "Баллы": f"{score}/10",
                 "Капитализация": f"${mcap/1e9:.1f}B",
                 "Див. доходность (%)": round(div_yield, 2),
-                "P/E": round(pe, 1) if pe else "Убыток",
-                "P/FCF": round(p_fcf, 1) if p_fcf else "N/A",
+                "P/E": round(pe, 1) if pe and pe != 0 else "N/A",
+                "P/FCF": round(p_fcf, 1) if p_fcf and p_fcf != 0 else "N/A",
                 "Маржа (%)": round(margin, 1),
                 "Выручка": "⬆️" if rev_current > rev_prev else "⬇️",
                 "Прибыль": "⬆️" if net_inc_current > net_inc_prev else "⬇️",
@@ -151,8 +154,6 @@ P/E и P/FCF: Твои стоп-краны. Если они красные (вы
 Этот блок отвечает на вопрос: «Выживет ли компания в кризис?»
 
 Долг/Рынок (%): Если он < 20%, компания финансово неубиваема.
-
-Ликвидность: Если > 1.1, у компании нет проблем с наличностью на операционку.
 
 Как пользоваться таблицей для сравнения (лайфхак):
 Если ты вводишь, например, V и MA, смотри на них в таком порядке:
