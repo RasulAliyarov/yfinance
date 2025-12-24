@@ -55,7 +55,7 @@ def analyze_stocks_v2(tickers):
             if pe is None:
                 pe = mcap / net_inc_current if net_inc_current != 0 else None
 
-                
+
             if net_inc_current <= 0:
                 pe = None
 
@@ -152,17 +152,9 @@ def analyze_stocks_v2(tickers):
             else:
                 signal = "❌ МИМО"
 
-            # --- Эмодзи для Режима ---
-            mode_map = {
-                "PROFITABLE": "💰 PROFIT",
-                "GROWTH": "🚀 GROWTH",
-                "VENTURE": "🧪 VENTURE"
-            }
-            display_mode = mode_map.get(mode, mode)
 
             results.append({
                 "Тикер": symbol,
-                "Режим": mode,
                 "Сигнал": signal,
                 "Баллы": score,
                 "Капитализация ($B)": round(mcap / 1e9, 2),
@@ -184,14 +176,16 @@ def analyze_stocks_v2(tickers):
 # --- ИНТЕРФЕЙС STREAMLIT ---
 st.title("📊 Финансовый Терминал: История и Перспективы")
 
-user_input = st.text_input("Введите тикеры (через запятую):", "V, MA, KO, TSLA")
-tickers = [t.strip().upper() for t in user_input.split(",")]
+user_input = st.text_input("Введите тикеры (через запятую):", "V, MA")
 
 mode_filter = st.selectbox(
     "🎯 Режим анализа:",
     options=["ALL", "PROFITABLE", "GROWTH", "VENTURE"],
     help="Фильтрация компаний по типу бизнес-модели"
 )
+
+tickers = [t.strip().upper() for t in user_input.split(",")]
+
 
 
 if st.button("Запустить анализ"):
