@@ -33,14 +33,16 @@ def analyze_stocks(tickers):
             ocf = cf.loc['Operating Cash Flow'].iloc[0]
             capex = abs(cf.loc['Capital Expenditure'].iloc[0])
             fcf = ocf - capex
-            p_fcf = mcap / fcf if fcf > 0 else 0
+            
+            # Раньше тут был "if fcf > 0 else 0", теперь считаем честно
+            p_fcf = mcap / fcf if fcf != 0 else 0
+            
             debt_market_ratio = (total_debt / mcap * 100) if mcap > 0 else 0
 
-            # --- 2. Работа с дивидендами (Trailing) ---
+            # --- 2. Работа с дивидендами ---
             div_yield_raw = info.get('trailingAnnualDividendYield', 0)
-            if not div_yield_raw: # Если trailing пуст, берем обычный
+            if not div_yield_raw:
                 div_yield_raw = info.get('dividendYield', 0)
-            
             div_yield = div_yield_raw * 100 if div_yield_raw else 0
 
             # --- 3. Скорринг (Логика баллов) ---
@@ -49,34 +51,33 @@ def analyze_stocks(tickers):
             if net_inc_current > net_inc_prev: score += 1
             if fcf > 0: score += 1
             
-            # P/E фильтр
+            # P/E фильтр: балл только если компания прибыльна и недорога
             if 0 < pe <= 25: score += 1
-            elif pe > 50: score -= 2 
+            elif pe > 50 or pe < 0: score -= 2 # Штраф за пузырь ИЛИ за убыточность
             
             if 0 < p_fcf <= 25: score += 1
             if cr > 1.1: score += 1
             if margin > 15: score += 1
             if debt_market_ratio < 20: score += 1
             
-            # Логика дивидендов (Надежность)
             if div_yield > 0:
-                score += 1 # Балл за сам факт выплаты
+                score += 1
                 if 0 < payout_ratio < 0.7:
-                    score += 1 # Дополнительный балл за безопасность (тратят < 70%)
+                    score += 1
                 elif payout_ratio > 1.0:
-                    score -= 2 # ШТРАФ: Платят больше, чем зарабатывают (риск отмены)
-
+                    score -= 2
 
             signal = "🚀 КУПИТЬ" if score >= 7 else "👀 ЖДАТЬ" if score >= 5 else "❌ МИМО"
 
+            # --- 4. Формирование результата ---
             results.append({
                 "Тикер": symbol,
                 "Сигнал": signal,
                 "Баллы": score,
                 "Капитализация": f"${mcap/1e9:.1f}B",
                 "Дивиденды (%)": round(div_yield, 2),
-                "P/E": round(pe, 1) if pe else 0,
-                "P/FCF": round(p_fcf, 1) if p_fcf else 0,
+                "P/E": round(pe, 1) if pe else "N/A",
+                "P/FCF": round(p_fcf, 1) if p_fcf else "N/A",
                 "Долг/Рынок (%)": round(debt_market_ratio, 1),
                 "Маржа (%)": round(margin, 1),
                 "Выручка": "⬆️" if rev_current > rev_prev else "⬇️",
