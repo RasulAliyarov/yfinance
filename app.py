@@ -2,6 +2,8 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 from io import BytesIO
+import time
+import requests
 
 st.set_page_config(page_title="Stock Analyzer Pro", layout="wide")
 
@@ -13,9 +15,10 @@ def to_excel(df):
 
 def analyze_stocks_v2(tickers):
     results = []
+    session = requests.Session()
     for symbol in tickers:
         try:
-            stock = yf.Ticker(symbol)
+            stock = yf.Ticker(symbol, session=session)
             info = stock.info
             fin = stock.financials
             cf = stock.cashflow
@@ -118,6 +121,8 @@ def analyze_stocks_v2(tickers):
                 "Дивиденды (%)": round(div_yield, 2),
                 "Yahoo": f"https://finance.yahoo.com/quote/{symbol}" 
             })
+
+            time.sleep(2)
         except Exception as e:
             st.warning(f"Ошибка тикера {symbol}: {e}")
 
