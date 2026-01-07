@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 from io import BytesIO
 import time
-import requests
 
 st.set_page_config(page_title="Stock Analyzer Pro", layout="wide")
 
@@ -15,10 +14,9 @@ def to_excel(df):
 
 def analyze_stocks_v2(tickers):
     results = []
-    session = requests.Session()
     for symbol in tickers:
         try:
-            stock = yf.Ticker(symbol, session=session)
+            stock = yf.Ticker(symbol)
             info = stock.info
             fin = stock.financials
             cf = stock.cashflow
