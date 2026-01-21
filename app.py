@@ -17,7 +17,13 @@ def analyze_stocks_v2(tickers):
     for symbol in tickers:
         try:
             stock = yf.Ticker(symbol)
-            info = stock.info
+            raw_info = stock.info
+
+            if callable(raw_info):
+                info = stock.get_info() or {}
+            else:
+                info = raw_info or {}
+
             fin = stock.financials
             cf = stock.cashflow
 
@@ -26,6 +32,7 @@ def analyze_stocks_v2(tickers):
 
             fin = fin.sort_index(axis=1, ascending=False)
             cf = cf.sort_index(axis=1, ascending=False)
+
 
             # --- 1. Сбор данных о доходах ---
             rev_current = fin.loc['Total Revenue'].iloc[0]
@@ -101,10 +108,24 @@ def analyze_stocks_v2(tickers):
                 if rev_current > 0: score += 1
                 if total_debt == 0: score += 1
 
+            # --- 7. Цена ---
+            price = info.get('regularMarketPrice')
+
+            if price is None:
+                hist = stock.history(period="1d")
+                price = hist['Close'].iloc[-1] if not hist.empty else None
+
+            # --- 8. Валюта ---
+            currency = info.get('currency')
+            if not currency:
+                hist = stock.history(period="1d")
+                currency = hist['Close'].name.split('-')[-1] if hasattr(hist['Close'], 'name') else "N/A"
+
             signal = "🚀 КУПИТЬ" if score >= 7 else "👀 ЖДАТЬ" if score >= 5 else "❌ МИМО"
 
             results.append({
                 "Тикер": symbol,
+                "Цена": f"{round(price, 2)} { currency}" if price else "N/A",
                 "Режим": mode,
                 "Сигнал": signal,
                 "Баллы": score,
@@ -143,8 +164,8 @@ if st.button("Запустить анализ"):
 
             df = df.sort_values(by="Баллы", ascending=False)
 
-            excel_data = to_excel(df)
-            st.download_button(label='📥 Скачать Excel', data=excel_data, file_name='stock_analysis.xlsx')
+            # excel_data = to_excel(df)
+            # st.download_button(label='📥 Скачать Excel', data=excel_data, file_name='stock_analysis.xlsx')
 
             st.dataframe(
                 df,
@@ -155,7 +176,7 @@ if st.button("Запустить анализ"):
                     "P/E": st.column_config.TextColumn("P/E (Минус = Убыток)"),
                 },
                 hide_index=True,
-                use_container_width=True
+                width='stretch'
             )
             st.success("Анализ завершен!")
 
