@@ -3,7 +3,7 @@ import streamlit as st
 st.title("Главная страница")
 st.write("Это главная страница вашего приложения Streamlit.")
 
-st.write("My Shares: VUAG, ASML, VEUA.L, CCJ, RKLB, ASTS, IONQ, CVE, LUG.TO, DPM.TO, EXK, ASM,  COPX")
+st.write("My Shares:  ASML, CCJ, RKLB, ASTS, IONQ, CVE, LUG.TO, DPM.TO, EXK, ASM")
 
 
 
